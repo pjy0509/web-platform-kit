@@ -1,0 +1,67 @@
+{
+  "name": "web-platform",
+  "version": "0.0.1",
+  "description": "TypeScript user-agent & platform detection — OS, browser, engine, and device parsing with User-Agent Client Hints (high-entropy) merging, version comparison, WebView/PWA/Node detection.",
+  "author": "Park Jungyoung <qkrwnss0509@gmail.com> (https://github.com/pjy0509)",
+  "type": "module",
+
+  "sideEffects": false,
+
+  "main": "dist/platform.cjs",
+  "module": "dist/platform.mjs",
+  "browser": "dist/platform.umd.js",
+  "types": "dist/index.d.ts",
+
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/platform.mjs",
+      "require": "./dist/platform.cjs",
+      "default": "./dist/platform.mjs"
+    }
+  },
+
+  "files": [
+    "dist/**",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+
+  "scripts": {
+    "build": "rollup -c",
+    "prepublishOnly": "npm run build"
+  },
+
+  "license": "MIT",
+
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pjy0509/web-platform.git"
+  },
+  "homepage": "https://pjy0509.github.io/example/web-platform/",
+  "keywords": [
+    "user-agent",
+    "user-agent-parser",
+    "ua-parser",
+    "browser-detection",
+    "os-detection",
+    "device-detection",
+    "engine-detection",
+    "client-hints",
+    "user-agent-client-hints",
+    "platform",
+    "webview",
+    "pwa",
+    "version-compare"
+  ],
+  "devDependencies": {
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "rollup": "^4.52.5",
+    "rollup-plugin-dts": "^6.2.3",
+    "typescript": "^5.9.3",
+    "tslib": "^2.8.1"
+  }
+}
