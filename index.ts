@@ -1,3 +1,5 @@
+import packageJSON from "./package.json" assert {type: 'json'};
+
 declare global {
     interface Navigator {
         userAgentData?: UserAgentData;
@@ -13,6 +15,30 @@ declare global {
     }
 
     var process: NodeProcess | undefined;
+}
+
+export interface PlatformInstance {
+    readonly version: string;
+
+    get ready(): Promise<void>;
+
+    set userAgent(userAgent: string);
+
+    get userAgent(): string;
+
+    get os(): NameVersionPair<OS>;
+
+    get browser(): NameVersionPair<Browsers>;
+
+    get engine(): NameVersionPair<Engines>;
+
+    get device(): Devices;
+
+    get webview(): boolean;
+
+    get node(): boolean;
+
+    get standalone(): boolean;
 }
 
 type UserAgentDataBrand = | ModernUserAgentDataBrand | string | null | undefined;
@@ -441,61 +467,63 @@ export function compareVersion(lhs: string, rhs: string): -1 | 0 | 1 {
     return 0;
 }
 
-export default function parseUserAgent() {
-    return {
-        get ready(): Promise<void> {
-            return ready;
-        },
+const Platform: PlatformInstance = {
+    version: packageJSON.version,
 
-        set userAgent(userAgent: string) {
-            if (currentUserAgent === userAgent) return;
+    get ready(): Promise<void> {
+        return ready;
+    },
 
-            currentUserAgent = userAgent;
-            invalidateCache();
-            ready = parseFromHighEntropyValues();
-        },
+    set userAgent(userAgent: string) {
+        if (currentUserAgent === userAgent) return;
 
-        get userAgent(): string {
-            return currentUserAgent;
-        },
+        currentUserAgent = userAgent;
+        invalidateCache();
+        ready = parseFromHighEntropyValues();
+    },
 
-        get os(): NameVersionPair<OS> {
-            return getParsedCache().os;
-        },
+    get userAgent(): string {
+        return currentUserAgent;
+    },
 
-        get browser(): NameVersionPair<Browsers> {
-            return getParsedCache().browser;
-        },
+    get os(): NameVersionPair<OS> {
+        return getParsedCache().os;
+    },
 
-        get engine(): NameVersionPair<Engines> {
-            return getParsedCache().engine;
-        },
+    get browser(): NameVersionPair<Browsers> {
+        return getParsedCache().browser;
+    },
 
-        get device(): Devices {
-            if (currentUserAgent === USER_AGENT && parsedFromHighEntropyValuesDevice !== null) return parsedFromHighEntropyValuesDevice;
+    get engine(): NameVersionPair<Engines> {
+        return getParsedCache().engine;
+    },
 
-            const osName: OS = getParsedCache().os.name;
+    get device(): Devices {
+        if (currentUserAgent === USER_AGENT && parsedFromHighEntropyValuesDevice !== null) return parsedFromHighEntropyValuesDevice;
 
-            if (osName === 'ios' || osName === 'android') return 'mobile';
-            if (osName === 'windows' || osName === 'macos') return 'desktop';
-            return 'unknown';
-        },
+        const osName: OS = getParsedCache().os.name;
 
-        get webview(): boolean {
-            return /; ?wv|applewebkit(?!.*safari)/i.test(currentUserAgent);
-        },
+        if (osName === 'ios' || osName === 'android') return 'mobile';
+        if (osName === 'windows' || osName === 'macos') return 'desktop';
+        return 'unknown';
+    },
 
-        get node(): boolean {
-            return typeof globalThis.process !== 'undefined' && typeof globalThis.process.versions !== 'undefined' && typeof globalThis.process.versions.node !== 'undefined';
-        },
+    get webview(): boolean {
+        return /; ?wv|applewebkit(?!.*safari)/i.test(currentUserAgent);
+    },
 
-        get standalone(): boolean {
-            const osName: OS = getParsedCache().os.name;
+    get node(): boolean {
+        return typeof globalThis.process !== 'undefined' && typeof globalThis.process.versions !== 'undefined' && typeof globalThis.process.versions.node !== 'undefined';
+    },
 
-            if (osName === 'ios') return globalThis.navigator.standalone === true;
-            if (typeof globalThis.matchMedia === 'undefined') return false;
+    get standalone(): boolean {
+        const osName: OS = getParsedCache().os.name;
 
-            return globalThis.matchMedia('(display-mode: standalone)').matches;
-        },
-    }
+        if (osName === 'ios') return globalThis.navigator.standalone === true;
+        if (typeof globalThis.matchMedia === 'undefined') return false;
+
+        return globalThis.matchMedia('(display-mode: standalone)').matches;
+    },
 }
+
+export default Platform;
