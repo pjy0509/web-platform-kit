@@ -17,7 +17,7 @@ declare global {
     var process: NodeProcess | undefined;
 }
 
-export interface PlatformInstance {
+export interface PlatformKitInstance {
     readonly version: string;
 
     get ready(): Promise<void>;
@@ -39,6 +39,8 @@ export interface PlatformInstance {
     get node(): boolean;
 
     get standalone(): boolean;
+
+    compareVersion(lhs: string, rhs: string): -1 | 0 | 1;
 }
 
 type UserAgentDataBrand = | ModernUserAgentDataBrand | string | null | undefined;
@@ -467,7 +469,7 @@ export function compareVersion(lhs: string, rhs: string): -1 | 0 | 1 {
     return 0;
 }
 
-const Platform: PlatformInstance = {
+const PlatformKit: PlatformKitInstance = {
     version: packageJSON.version,
 
     get ready(): Promise<void> {
@@ -524,6 +526,28 @@ const Platform: PlatformInstance = {
 
         return globalThis.matchMedia('(display-mode: standalone)').matches;
     },
+
+    compareVersion(lhs: string, rhs: string): -1 | 0 | 1 {
+        const pa: string[] = lhs.split('.');
+        const pb: string[] = rhs.split('.');
+        const length: number = Math.max(pa.length, pb.length);
+
+        for (let i: number = 0; i < length; i++) {
+            let a: number;
+            let b: number;
+
+            if (i < pa.length) a = parseInt(pa[i], 10);
+            else a = 0;
+
+            if (i < pb.length) b = parseInt(pb[i], 10);
+            else b = 0;
+
+            if (a > b) return 1;
+            if (a < b) return -1;
+        }
+
+        return 0;
+    }
 }
 
-export default Platform;
+export default PlatformKit;

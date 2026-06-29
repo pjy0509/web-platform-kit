@@ -5,9 +5,9 @@ import dts from 'rollup-plugin-dts'
 import path from 'path'
 
 const input = 'index.ts'
-const jsOutBase = 'dist/platform.'
+const jsOutBase = 'dist/platform-kit.'
 const dtsOutFile = 'dist/index.d.ts'
-const umdName = 'Platform'
+const umdName = 'PlatformKit'
 
 const formats = [
 	{ format: 'es', extension: 'mjs', minExtension: 'min.mjs' },

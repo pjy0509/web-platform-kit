@@ -1,5 +1,5 @@
 {
-  "name": "web-platform",
+  "name": "web-platform-kit",
   "version": "0.0.1",
   "description": "TypeScript user-agent & platform detection — OS, browser, engine, and device parsing with User-Agent Client Hints (high-entropy) merging, version comparison, WebView/PWA/Node detection.",
   "author": "Park Jungyoung <qkrwnss0509@gmail.com> (https://github.com/pjy0509)",
@@ -7,17 +7,17 @@
 
   "sideEffects": false,
 
-  "main": "dist/platform.cjs",
-  "module": "dist/platform.mjs",
-  "browser": "dist/platform.umd.js",
+  "main": "dist/platform-kit.cjs",
+  "module": "dist/platform-kit.mjs",
+  "browser": "dist/platform-kit.umd.js",
   "types": "dist/index.d.ts",
 
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/platform.mjs",
-      "require": "./dist/platform.cjs",
-      "default": "./dist/platform.mjs"
+      "import": "./dist/platform-kit.mjs",
+      "require": "./dist/platform-kit.cjs",
+      "default": "./dist/platform-kit.mjs"
     }
   },
 
@@ -37,9 +37,9 @@
 
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pjy0509/web-platform.git"
+    "url": "git+https://github.com/pjy0509/web-platform-kit.git"
   },
-  "homepage": "https://pjy0509.github.io/example/web-platform/",
+  "homepage": "https://pjy0509.github.io/example/web-platform-kit/",
   "keywords": [
     "user-agent",
     "user-agent-parser",
