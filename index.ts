@@ -17,29 +17,130 @@ declare global {
     var process: NodeProcess | undefined;
 }
 
+/**
+ * User-agent & platform detector for the current environment.
+ *
+ * Resolves OS, browser, engine, and device from the UA string, then refines the
+ * result with User-Agent Client Hints (high-entropy) where available. Also exposes
+ * WebView / PWA / Node detection and a version-comparison helper.
+ *
+ * @remarks
+ * Detection is best-effort — user agents are spoofable and inconsistent across
+ * vendors. On Chromium, the most accurate versions come from Client Hints, which
+ * resolve asynchronously; await {@link PlatformKitInstance.ready} before reading
+ * for best accuracy. State is shared: setting {@link PlatformKitInstance.userAgent}
+ * changes detection globally for every reader.
+ *
+ * @example
+ * ```ts
+ * await PlatformKit.ready;
+ * if (PlatformKit.os.name === 'ios' && PlatformKit.compareVersion(PlatformKit.os.version, '15.0') >= 0) {
+ *   // iOS 15+
+ * }
+ * ```
+ */
 export interface PlatformKitInstance {
+    /**
+     * The installed package version.
+     */
     readonly version: string;
 
+    /**
+     * Resolves once the asynchronous User-Agent Client Hints have merged in.
+     *
+     * @remarks
+     * Before this settles, `os` / `browser` / `engine` return values parsed from the
+     * UA string alone. On non-Chromium browsers it resolves immediately, since Client
+     * Hints are unavailable there. Re-created whenever `userAgent` is set.
+     */
     get ready(): Promise<void>;
 
+    /**
+     * Overrides the UA string to parse an arbitrary user agent.
+     *
+     * @param userAgent - The UA string to parse from.
+     *
+     * @remarks
+     * This is shared singleton state — the override changes detection for every reader,
+     * not just the next call. Parsing a custom UA is purely string-based (no Client
+     * Hints merge). Restore the original if other code relies on the real environment.
+     */
     set userAgent(userAgent: string);
 
+    /**
+     * The UA string currently used for detection (the real environment's, or an override).
+     */
     get userAgent(): string;
 
+    /**
+     * The detected operating system as a `{ name, version }` pair.
+     *
+     * @remarks
+     * `name` is one of `'windows'`, `'macos'`, `'android'`, `'ios'`, or `'unknown'`.
+     * iPadOS reporting a desktop UA is re-classified to `'ios'` when standalone with
+     * `maxTouchPoints > 2`.
+     */
     get os(): NameVersionPair<OS>;
 
+    /**
+     * The detected browser as a `{ name, version }` pair.
+     *
+     * @remarks
+     * `name` is one of `'chrome'`, `'safari'`, `'edge'`, `'firefox'`, `'opera'`,
+     * `'ie'`, `'samsung'`, or `'unknown'`.
+     */
     get browser(): NameVersionPair<Browsers>;
 
+    /**
+     * The detected rendering engine as a `{ name, version }` pair.
+     *
+     * @remarks
+     * `name` covers `'blink'`, `'webKit'`, `'gecko'`, `'presto'`, `'trident'`,
+     * `'edgeHtml'`, `'arkWeb'`, and others, or `'unknown'`.
+     */
     get engine(): NameVersionPair<Engines>;
 
+    /**
+     * The device form factor: `'mobile'`, `'desktop'`, or `'unknown'`.
+     *
+     * @remarks
+     * Prefers the Client Hints `mobile` signal when the real UA is active, otherwise
+     * infers from the detected OS.
+     */
     get device(): Devices;
 
+    /**
+     * Whether the current context appears to be an embedded WebView.
+     */
     get webview(): boolean;
 
+    /**
+     * Whether the code is running under Node.js.
+     */
     get node(): boolean;
 
+    /**
+     * Whether the page is running as an installed PWA (standalone display mode).
+     *
+     * @remarks
+     * On iOS this reads `navigator.standalone`; elsewhere it checks the
+     * `(display-mode: standalone)` media query.
+     */
     get standalone(): boolean;
 
+    /**
+     * Compares two dotted version strings numerically.
+     *
+     * @param lhs - The left-hand version (e.g. `'17.4'`).
+     * @param rhs - The right-hand version (e.g. `'15.0'`).
+     * @returns `1` if `lhs > rhs`, `-1` if `lhs < rhs`, `0` if equal.
+     *
+     * @remarks
+     * Compares segment by segment as integers, treating missing segments as `0`
+     * (so `'15'` equals `'15.0'`). Intended for numeric versions; Windows label
+     * strings such as `'XP'` or `'Vista'` are not numeric and will not compare
+     * meaningfully — compare within a single OS's numeric versions.
+     */
     compareVersion(lhs: string, rhs: string): -1 | 0 | 1;
 }
 
