@@ -1,20 +1,31 @@
-import packageJSON from "./package.json" assert {type: 'json'};
+import packageJSON from "./package.json" with {type: 'json'};
 
-declare global {
-    interface Navigator {
-        userAgentData?: UserAgentData;
-        standalone?: boolean;
-    }
+declare const global: unknown;
 
-    interface NodeProcessVersions {
-        node?: string;
-    }
+interface NavigatorLike {
+    userAgent?: string;
+    userAgentData?: UserAgentData;
+    standalone?: boolean;
+    maxTouchPoints?: number;
+}
 
-    interface NodeProcess {
-        versions?: NodeProcessVersions;
-    }
+interface NodeProcessVersionsLike {
+    node?: string;
+}
 
-    var process: NodeProcess | undefined;
+interface NodeProcessLike {
+    versions?: NodeProcessVersionsLike;
+}
+
+interface MediaQueryListLike {
+    matches: boolean;
+}
+
+interface GlobalLike {
+    navigator?: NavigatorLike;
+    process?: NodeProcessLike;
+
+    matchMedia?(query: string): MediaQueryListLike;
 }
 
 /**
@@ -56,6 +67,18 @@ export interface PlatformKitInstance {
     get ready(): Promise<void>;
 
     /**
+     * Callback form of {@link PlatformKitInstance.ready}.
+     *
+     * @param callback - Invoked once Client Hints have merged in.
+     *
+     * @remarks
+     * Prefer `ready` on modern engines. This exists for environments without `Promise`
+     * (IE, old WebKit), where `ready` hands out a `then`-able stand-in that cannot be
+     * `await`ed. There the callback runs synchronously, since there is nothing to wait for.
+     */
+    whenReady(callback: () => void): void;
+
+    /**
      * Overrides the UA string to parse an arbitrary user agent.
      *
      * @param userAgent - The UA string to parse from.
@@ -66,6 +89,15 @@ export interface PlatformKitInstance {
      * Hints merge). Restore the original if other code relies on the real environment.
      */
     set userAgent(userAgent: string);
+
+    /**
+     * Restores detection to the real environment's user agent.
+     *
+     * @remarks
+     * Undoes a {@link PlatformKitInstance.userAgent} override and re-runs the Client Hints
+     * merge. A no-op when no override is active.
+     */
+    reset(): void;
 
     /**
      * The UA string currently used for detection (the real environment's, or an override).
@@ -101,18 +133,37 @@ export interface PlatformKitInstance {
     get engine(): NameVersionPair<Engines>;
 
     /**
-     * The device form factor: `'mobile'`, `'desktop'`, or `'unknown'`.
+     * The device form factor: `'mobile'`, `'tablet'`, `'desktop'`, or `'unknown'`.
      *
      * @remarks
-     * Prefers the Client Hints `mobile` signal when the real UA is active, otherwise
-     * infers from the detected OS.
+     * Prefers the Client Hints `formFactors` signal when the real UA is active. Otherwise
+     * iOS is split by the `iPad` marker and Android by the presence of the `Mobile` token,
+     * which tablets omit. `mobile: false` on its own is not treated as desktop, since it
+     * cannot distinguish a tablet from one.
      */
     get device(): Devices;
 
     /**
-     * Whether the current context appears to be an embedded WebView.
+     * Whether the current context appears to be an embedded web view.
+     *
+     * @remarks
+     * Detected from explicit host signals: the Android `wv` token, the legacy
+     * `Version/x Chrome/y` pairing, an `Electron/` token, an iOS UA carrying no `Safari`
+     * token, or any recognised {@link PlatformKitInstance.inAppBrowser}.
      */
     get webview(): boolean;
+
+    /**
+     * Which in-app browser is hosting the page, or `null` when it is not one.
+     *
+     * @remarks
+     * These are the messenger and social apps that render pages in their own embedded
+     * browser, where features such as file upload, downloads and `window.open` routinely
+     * behave differently from the platform browser. On iOS such hosts omit the `Safari`
+     * token, so {@link PlatformKitInstance.browser} reports `'safari'` with no version —
+     * this property tells you which app is actually in front of the user.
+     */
+    get inAppBrowser(): InAppBrowsers | null;
 
     /**
      * Whether the code is running under Node.js.
@@ -148,7 +199,8 @@ type UserAgentDataBrand = | ModernUserAgentDataBrand | string | null | undefined
 export type OS = 'unknown' | 'windows' | 'macos' | 'android' | 'ios';
 export type Browsers = 'unknown' | 'chrome' | 'safari' | 'edge' | 'firefox' | 'opera' | 'ie' | 'samsung';
 export type Engines = 'unknown' | 'edgeHtml' | 'arkWeb' | 'blink' | 'presto' | 'webKit' | 'trident' | 'netFront' | 'khtml' | 'tasman' | 'gecko';
-export type Devices = 'unknown' | 'mobile' | 'desktop';
+export type Devices = 'unknown' | 'mobile' | 'tablet' | 'desktop';
+export type InAppBrowsers = 'kakaotalk' | 'line' | 'instagram' | 'facebook' | 'naver' | 'daum' | 'band' | 'wechat' | 'twitter' | 'tiktok';
 type VersionResolver = undefined | string | ((value: string | undefined) => string);
 
 interface ModernUserAgentDataBrand {
@@ -161,6 +213,7 @@ interface UserAgentDataValues {
     fullVersionList?: UserAgentDataBrand[];
     platformVersion?: string | null | undefined;
     platform?: string | null | undefined;
+    formFactors?: string[] | null | undefined;
     mobile?: boolean;
 }
 
@@ -180,21 +233,34 @@ export interface NameVersionPair<T> {
     readonly version: string;
 }
 
-const NAVIGATOR: Navigator = globalThis.navigator;
-const USER_AGENT: string = typeof NAVIGATOR !== 'undefined' ? NAVIGATOR.userAgent : '';
-const USER_AGENT_DATA: UserAgentData | undefined = typeof NAVIGATOR !== 'undefined' ? NAVIGATOR.userAgentData : undefined;
+function getGlobal(): GlobalLike {
+    if (typeof globalThis !== 'undefined') return globalThis as GlobalLike;
+    if (typeof self !== 'undefined') return self as GlobalLike;
+    if (typeof window !== 'undefined') return window as GlobalLike;
+    if (typeof global !== 'undefined') return global as GlobalLike;
+
+    return {};
+}
+
+const GLOBAL: GlobalLike = getGlobal();
+const NAVIGATOR: NavigatorLike | undefined = GLOBAL.navigator;
+const USER_AGENT: string = typeof NAVIGATOR !== 'undefined' && NAVIGATOR !== null && typeof NAVIGATOR.userAgent === 'string' ? NAVIGATOR.userAgent : '';
+const USER_AGENT_DATA: UserAgentData | undefined = typeof NAVIGATOR !== 'undefined' && NAVIGATOR !== null ? NAVIGATOR.userAgentData : undefined;
 
 const OS_RESOLVER_MAP: [RegExp, OS, VersionResolver?][] = [
     // Windows RT
-    [/windows nt (6\.[23]); arm/i, 'windows', resolveWindowsVersion],
+    [/windows nt (6\.[23]); arm/i, 'windows', 'RT'],
     // Windows IoT/Mobile/Phone
-    [/windows (?:phone|mobile|iot)(?: os)?[\/ ]?([\d.]*( se)?)/i, 'windows', resolveWindowsVersion],
+    [/windows (?:phone|mobile|iot)(?: os)?[\/ ]?([\d.]*( se)?)/i, 'windows'],
+    // Windows ME identifies itself as "Windows 98; Win 9x 4.90", so it must be checked
+    // before the label pattern below claims the `98`
+    [/win 9x 4\.90/i, 'windows', 'ME'],
     // Windows NT/3.1/95/98/ME/2000/XP/Vista/7/8/8.1/10/11
-    [/windows[\/ ](1[01]|2000|3\.1|7|8(\.1)?|9[58]|me|server 20\d\d( r2)?|vista|xp)/i, 'windows', resolveWindowsVersion],
+    [/windows[\/ ](1[01]|2000|3\.1|7|8(\.1)?|9[58]|me|server 20\d\d( r2)?|vista|xp)/i, 'windows'],
     [/windows nt ?([\d.)]*)(?!.+xbox)/i, 'windows', resolveWindowsVersion],
     [/\bwin(?=3| ?9|n)(?:nt| 9x )?([\d.;]*)/i, 'windows', resolveWindowsVersion],
     // Windows CE
-    [/windows ce\/?([\d.]*)/i, 'windows', resolveWindowsVersion],
+    [/windows ce\/?([\d.]*)/i, 'windows'],
 
     // iOS
     [/[adehimnop]{4,7}\b(?:.*os (\w+) like mac|; opera)/i, 'ios', resolveUnderscoreVersion],
@@ -261,7 +327,7 @@ const BROWSER_RESOLVER_MAP: [RegExp, Browsers, VersionResolver?][] = [
     [/wv\).+chrome\/([\w.]+).+edgw\//i, 'edge'],
 
     // Chrome WebView
-    [/ wv\).+(chrome)\/([\w.]+)/i, 'chrome'],
+    [/ wv\).+chrome\/([\w.]+)/i, 'chrome'],
     // Chrome Mobile
     [/chrome\/([\w.]+) mobile/i, 'chrome'],
     // Chrome
@@ -275,6 +341,9 @@ const BROWSER_RESOLVER_MAP: [RegExp, Browsers, VersionResolver?][] = [
     // Safari (< 3.0)
     [/webkit.+?(?:mobile ?safari|safari)(\/[\w.]+)/i, 'safari', '1'],
 
+    // iOS in-app WKWebView
+    [/(?:iphone|ipad|ipod).+applewebkit(?!.*safari)/i, 'safari'],
+
     // Firefox Mobile
     [/(?:mobile|tablet);.*firefox\/([\w.-]+)/i, 'firefox'],
     // Firefox Reality
@@ -283,7 +352,7 @@ const BROWSER_RESOLVER_MAP: [RegExp, Browsers, VersionResolver?][] = [
     [/firefox\/([\w.]+)/i, 'firefox'],
 ];
 
-export const ENGINE_RESOLVER_MAP: [RegExp, Engines, VersionResolver?][] = [
+const ENGINE_RESOLVER_MAP: [RegExp, Engines, VersionResolver?][] = [
     // EdgeHTML
     [/windows.+ edge\/([\w.]+)/i, 'edgeHtml'],
     // ArkWeb
@@ -306,7 +375,20 @@ export const ENGINE_RESOLVER_MAP: [RegExp, Engines, VersionResolver?][] = [
     [/rv:([\w.]{1,9})\b.+gecko/i, 'gecko']
 ];
 
-export const HIGH_ENTROPY_BRAND_NAME_MAP: Record<string, string> = {
+const IN_APP_BROWSER_RESOLVER_MAP: [RegExp, InAppBrowsers][] = [
+    [/kakaotalk/i, 'kakaotalk'],
+    [/\bline\/[\d.]/i, 'line'],
+    [/instagram/i, 'instagram'],
+    [/\bfban\/|\bfbav\/|fb_iab/i, 'facebook'],
+    [/naver\(inapp/i, 'naver'],
+    [/daumapps/i, 'daum'],
+    [/\bband\/[\d.]/i, 'band'],
+    [/micromessenger/i, 'wechat'],
+    [/twitter for|twitterandroid/i, 'twitter'],
+    [/musical_ly|bytedancewebview|\btiktok/i, 'tiktok'],
+];
+
+const HIGH_ENTROPY_BRAND_NAME_MAP: Record<string, string> = {
     'Google Chrome': 'Chrome',
     'Microsoft Edge': 'Edge',
     'Microsoft Edge WebView2': 'Edge WebView2',
@@ -330,19 +412,18 @@ function resolveWindowsVersion(string: string | undefined): string {
 
     const mapped: string | undefined = {
         '4.90': 'ME',
-        'NT3.51': 'NT 3.11',
-        'NT4.0': 'NT 4.0',
-        'NT 5.0': '2000',
-        'NT 5.1': 'XP',
-        'NT 5.2': 'XP',
-        'NT 6.0': 'Vista',
-        'NT 6.1': '7',
-        'NT 6.2': '8',
-        'NT 6.3': '8.1',
-        'NT 6.4': '10',
-        'NT 10.0': '10',
-        'ARM': 'RT'
-    }[string];
+        '3.51': 'NT 3.51',
+        '4.0': 'NT 4.0',
+        '5.0': '2000',
+        '5.1': 'XP',
+        '5.2': 'XP',
+        '6.0': 'Vista',
+        '6.1': '7',
+        '6.2': '8',
+        '6.3': '8.1',
+        '6.4': '10',
+        '10.0': '10'
+    }[string.replace(/[^\d.]/g, '')];
 
     if (typeof mapped !== 'undefined') return mapped;
     return string;
@@ -360,6 +441,28 @@ function resolveVersion(string: string | undefined, resolver: VersionResolver): 
     return string;
 }
 
+function compareVersion(lhs: string, rhs: string): -1 | 0 | 1 {
+    const pa: string[] = lhs.split('.');
+    const pb: string[] = rhs.split('.');
+    const length: number = Math.max(pa.length, pb.length);
+
+    for (let i: number = 0; i < length; i++) {
+        let a: number;
+        let b: number;
+
+        if (i < pa.length) a = parseInt(pa[i], 10);
+        else a = 0;
+
+        if (i < pb.length) b = parseInt(pb[i], 10);
+        else b = 0;
+
+        if (a > b) return 1;
+        if (a < b) return -1;
+    }
+
+    return 0;
+}
+
 function parseOS(): NameVersionPair<OS> {
     let name: OS = 'unknown';
     let version: string = '';
@@ -375,7 +478,8 @@ function parseOS(): NameVersionPair<OS> {
         }
     }
 
-    if (name === 'ios' && PlatformKit.compareVersion(version, '18.6') === 0) {
+    // iOS 26 freezes the UA at `OS 18_6` for compatibility and moves the real version into the `Version/` token; unfreeze it here. A future freeze will need the same treatment.
+    if (name === 'ios' && compareVersion(version, '18.6') === 0) {
         const execs: RegExpExecArray | null = /\) Version\/([\d.]+)/.exec(currentUserAgent);
 
         if (execs !== null) {
@@ -388,7 +492,7 @@ function parseOS(): NameVersionPair<OS> {
     if (currentUserAgent === USER_AGENT) {
         if (typeof parsedFromHighEntropyValuesOSName !== 'undefined') name = parsedFromHighEntropyValuesOSName;
         if (typeof parsedFromHighEntropyValuesOSVersion !== 'undefined') version = parsedFromHighEntropyValuesOSVersion;
-        if (name === 'macos' && typeof globalThis.navigator.standalone !== 'undefined' && typeof globalThis.navigator.maxTouchPoints !== 'undefined' && globalThis.navigator.maxTouchPoints > 2) name = 'ios';
+        if (name === 'macos' && typeof NAVIGATOR !== 'undefined' && NAVIGATOR !== null && typeof NAVIGATOR.standalone !== 'undefined' && typeof NAVIGATOR.maxTouchPoints === 'number' && NAVIGATOR.maxTouchPoints > 2) name = 'ios';
     }
 
     return {
@@ -448,6 +552,51 @@ function parseEngine(): NameVersionPair<Engines> {
     };
 }
 
+function parseInAppBrowser(): InAppBrowsers | null {
+    for (let i: number = 0; i < IN_APP_BROWSER_RESOLVER_MAP.length; i++) {
+        if (IN_APP_BROWSER_RESOLVER_MAP[i][0].test(currentUserAgent)) return IN_APP_BROWSER_RESOLVER_MAP[i][1];
+    }
+
+    return null;
+}
+
+function parseWebview(): boolean {
+    // Android WebView: the `wv` token, or the legacy `Version/x Chrome/y` pairing that only a WebView (or the old stock browser) emits.
+    if (/; ?wv\)/i.test(currentUserAgent)) return true;
+    if (/\bversion\/[\d.]+ chrome\//i.test(currentUserAgent)) return true;
+    // Desktop shells
+    if (/\belectron\//i.test(currentUserAgent)) return true;
+    // iOS WKWebView: an iOS UA with no `Safari` token at all
+    if (/iphone|ipad|ipod/i.test(currentUserAgent) && /applewebkit/i.test(currentUserAgent) && /safari/i.test(currentUserAgent) === false) return true;
+
+    return parseInAppBrowser() !== null;
+}
+
+/**
+ * The device form factor.
+ *
+ * @remarks
+ * Client Hints `formFactors` wins when present. Otherwise iOS is split by the `iPad`
+ * marker (iPadOS sends a desktop UA, which {@link parseOS} already re-classifies via
+ * `maxTouchPoints`), and Android by the presence of the `Mobile` token — tablets omit it.
+ */
+function parseDevice(): Devices {
+    if (currentUserAgent === USER_AGENT && parsedFromHighEntropyValuesDevice !== null) return parsedFromHighEntropyValuesDevice;
+
+    const osName: OS = getParsedCache().os.name;
+
+    if (osName === 'ios') {
+        if (/ipad/i.test(currentUserAgent) || /macintosh/i.test(currentUserAgent)) return 'tablet';
+
+        return 'mobile';
+    }
+
+    if (osName === 'android') return /\bmobile\b/i.test(currentUserAgent) ? 'mobile' : 'tablet';
+    if (osName === 'windows' || osName === 'macos') return 'desktop';
+
+    return 'unknown';
+}
+
 function getParsedCache(): ParsedCache {
     if (parsedCache !== null && parsedCache.userAgent === currentUserAgent) return parsedCache;
 
@@ -478,11 +627,33 @@ function normalizeBrand(entry: UserAgentDataBrand): ModernUserAgentDataBrand {
     return {brand: entry.brand, version: entry.version};
 }
 
+function resolvedThenable(): Promise<void> {
+    if (typeof Promise === 'function') return Promise.resolve();
+
+    const thenable: { then: Function; catch: Function; finally: Function } = {
+        then: function (onFulfilled?: (value: void) => unknown): unknown {
+            if (typeof onFulfilled === 'function') onFulfilled(undefined);
+
+            return thenable;
+        },
+        catch: function (): unknown {
+            return thenable;
+        },
+        finally: function (onFinally?: () => void): unknown {
+            if (typeof onFinally === 'function') onFinally();
+
+            return thenable;
+        },
+    };
+
+    return thenable as unknown as Promise<void>;
+}
+
 function parseFromHighEntropyValues(): Promise<void> {
-    if (typeof USER_AGENT_DATA === 'undefined' || typeof USER_AGENT_DATA.getHighEntropyValues === 'undefined') return Promise.resolve();
+    if (typeof USER_AGENT_DATA === 'undefined' || typeof USER_AGENT_DATA.getHighEntropyValues === 'undefined') return resolvedThenable();
 
     return USER_AGENT_DATA
-        .getHighEntropyValues(['brands', 'fullVersionList', 'mobile', 'model', 'platform', 'platformVersion', 'architecture', 'formFactors', 'bitness', 'uaFullVersion', 'wow64'])
+        .getHighEntropyValues(['brands', 'fullVersionList', 'mobile', 'platform', 'platformVersion', 'formFactors'])
         .then(function (result: UserAgentDataValues): void {
             try {
                 const brands: UserAgentDataBrand[] = result.fullVersionList || result.brands || [];
@@ -534,11 +705,22 @@ function parseFromHighEntropyValues(): Promise<void> {
                     else if (/macos|macintel/i.test(platform)) parsedFromHighEntropyValuesOSName = 'macos';
                 }
 
-                if (result.mobile === true) parsedFromHighEntropyValuesDevice = 'mobile';
+                const formFactors: string[] | null | undefined = result.formFactors;
 
-                parsedCache = null;
+                if (typeof formFactors !== 'undefined' && formFactors !== null && typeof formFactors.length === 'number') {
+                    for (let i: number = 0; i < formFactors.length; i++) {
+                        const formFactor: string = String(formFactors[i]).toLowerCase();
 
+                        if (formFactor === 'tablet') parsedFromHighEntropyValuesDevice = 'tablet';
+                        else if (formFactor === 'mobile') parsedFromHighEntropyValuesDevice = 'mobile';
+                        else if (formFactor === 'desktop') parsedFromHighEntropyValuesDevice = 'desktop';
+                    }
+                }
+
+                if (parsedFromHighEntropyValuesDevice === null && result.mobile === true) parsedFromHighEntropyValuesDevice = 'mobile';
             } catch (_: unknown) {
+            } finally {
+                parsedCache = null;
             }
         })
         .catch(function (): void {
@@ -555,11 +737,30 @@ const PlatformKit: PlatformKitInstance = {
         return ready;
     },
 
+    whenReady(callback: () => void): void {
+        if (typeof callback !== 'function') return;
+
+        ready.then(function (): void {
+            callback();
+        });
+    },
+
     set userAgent(userAgent: string) {
         if (currentUserAgent === userAgent) return;
 
         currentUserAgent = userAgent;
         invalidateCache();
+
+        // Client Hints describe the real environment, so they are only merged back in when the real UA is active. Re-requesting them for a custom UA is pure waste.
+        ready = userAgent === USER_AGENT ? parseFromHighEntropyValues() : resolvedThenable();
+    },
+
+    reset(): void {
+        if (currentUserAgent === USER_AGENT) return;
+
+        currentUserAgent = USER_AGENT;
+        invalidateCache();
+
         ready = parseFromHighEntropyValues();
     },
 
@@ -580,52 +781,38 @@ const PlatformKit: PlatformKitInstance = {
     },
 
     get device(): Devices {
-        if (currentUserAgent === USER_AGENT && parsedFromHighEntropyValuesDevice !== null) return parsedFromHighEntropyValuesDevice;
-
-        const osName: OS = getParsedCache().os.name;
-
-        if (osName === 'ios' || osName === 'android') return 'mobile';
-        if (osName === 'windows' || osName === 'macos') return 'desktop';
-        return 'unknown';
+        return parseDevice();
     },
 
     get webview(): boolean {
-        return /; ?wv|applewebkit(?!.*safari)/i.test(currentUserAgent);
+        return parseWebview();
+    },
+
+    get inAppBrowser(): InAppBrowsers | null {
+        return parseInAppBrowser();
     },
 
     get node(): boolean {
-        return typeof globalThis.process !== 'undefined' && typeof globalThis.process.versions !== 'undefined' && typeof globalThis.process.versions.node !== 'undefined';
+        const nodeProcess: NodeProcessLike | undefined = GLOBAL.process;
+
+        return typeof nodeProcess !== 'undefined' && nodeProcess !== null && typeof nodeProcess.versions !== 'undefined' && nodeProcess.versions !== null && typeof nodeProcess.versions.node !== 'undefined';
     },
 
     get standalone(): boolean {
         const osName: OS = getParsedCache().os.name;
 
-        if (osName === 'ios') return globalThis.navigator.standalone === true;
-        if (typeof globalThis.matchMedia === 'undefined') return false;
+        if (osName === 'ios') return typeof NAVIGATOR !== 'undefined' && NAVIGATOR !== null && NAVIGATOR.standalone === true;
+        if (typeof GLOBAL.matchMedia !== 'function') return false;
 
-        return globalThis.matchMedia('(display-mode: standalone)').matches;
+        try {
+            return GLOBAL.matchMedia('(display-mode: standalone)').matches === true;
+        } catch (_: unknown) {
+            return false;
+        }
     },
 
     compareVersion(lhs: string, rhs: string): -1 | 0 | 1 {
-        const pa: string[] = lhs.split('.');
-        const pb: string[] = rhs.split('.');
-        const length: number = Math.max(pa.length, pb.length);
-
-        for (let i: number = 0; i < length; i++) {
-            let a: number;
-            let b: number;
-
-            if (i < pa.length) a = parseInt(pa[i], 10);
-            else a = 0;
-
-            if (i < pb.length) b = parseInt(pb[i], 10);
-            else b = 0;
-
-            if (a > b) return 1;
-            if (a < b) return -1;
-        }
-
-        return 0;
+        return compareVersion(lhs, rhs);
     }
 }
 
